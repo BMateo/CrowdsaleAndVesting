@@ -3,9 +3,10 @@ pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract MyToken is ERC20, Pausable, Ownable {
+contract MyToken is ERC20, Pausable, Ownable, ReentrancyGuard {
     uint256 public maxWalletAmount;
     uint256 private TAXFEE = 1;
     mapping(address => bool) excludedFromTax;
@@ -20,8 +21,8 @@ contract MyToken is ERC20, Pausable, Ownable {
 
     function transfer(address recipient, uint256 amount)
         public
-        virtual
         override
+        nonReentrant
         returns (bool)
     {
         if (excludedFromTax[_msgSender()] || !taxEnable) {

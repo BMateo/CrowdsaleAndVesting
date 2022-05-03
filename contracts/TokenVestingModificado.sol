@@ -44,12 +44,16 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
         uint256  released;
         // whether or not the vesting has been revoked
         bool revoked;
+        // address of the contract that create schedule
+        address stage;
     }
 
     // address of the ERC20 token
     IERC20 immutable private _token;
 
     IRoles immutable private _roles;
+
+    bytes32 public constant DEFAULT_ADMIN_ROLE = 0x00;
 
     bytes32[] private vestingSchedulesIds;
     mapping(bytes32 => VestingSchedule) private vestingSchedules;
@@ -164,10 +168,11 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
         uint256 _duration,
         uint256 _slicePeriodSeconds,
         bool _revocable,
-        uint256 _amount
+        uint256 _amount,
+        address _stageContract
     )
         public {
-        require(_roles.hasRole(_roles.getHashRole("ICO_ADDRESS"), msg.sender), "Caller is not vesting contract");
+            require(_roles.hasRole(_roles.getHashRole("ICO_ADDRESS"),msg.sender) || _roles.hasRole(DEFAULT_ADMIN_ROLE,msg.sender),"Caller is not vesting contract nor the owner");
         require(
             this.getWithdrawableAmount() >= _amount,
             "TokenVesting: cannot create vesting schedule because not sufficient tokens"
@@ -187,7 +192,8 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
             _revocable,
             _amount,
             0,
-            false
+            false,
+            _stageContract
         );
         vestingSchedulesTotalAmount = vestingSchedulesTotalAmount.add(_amount);
         vestingSchedulesIds.push(vestingScheduleId);
@@ -361,4 +367,8 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
         return block.timestamp;
     }
 
+    function addTotalAmount(uint256 _amount, bytes32 _scheduleId) external {
+        VestingSchedule storage schedule = vestingSchedules[_scheduleId];
+        schedule.amountTotal += _amount;
+    }
 }
