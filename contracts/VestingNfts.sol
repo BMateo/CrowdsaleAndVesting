@@ -21,18 +21,22 @@ interface IRoles {
 /**
  * @title TokenVesting
  */
-contract TokenVestingModificado is Ownable, ReentrancyGuard{
+contract VestingNfts is Ownable, ReentrancyGuard{
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
+
+    bool public startInitialized = false;
+    uint256 public startTime;
+    //uint256 public cliff;
+
     struct VestingSchedule{
         bool initialized;
         // beneficiary of tokens after they are released
         address  beneficiary;
+        
         // cliff period in seconds
-        uint256  cliff;
-        // start time of the vesting period
-        uint256  start;
-        // duration of the vesting period in seconds
+        uint256 cliff;
+        // duration of vesting
         uint256  duration;
         // duration of a slice period for the vesting in seconds
         uint256 slicePeriodSeconds;
@@ -154,8 +158,6 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
     /**
     * @notice Creates a new vesting schedule for a beneficiary.
     * @param _beneficiary address of the beneficiary to whom vested tokens are transferred
-    * @param _start start time of the vesting period
-    * @param _cliff duration in seconds of the cliff in which tokens will begin to vest
     * @param _duration duration in seconds of the period in which the tokens will vest
     * @param _slicePeriodSeconds duration of a slice period for the vesting in seconds
     * @param _revocable whether the vesting is revocable or not
@@ -163,7 +165,6 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
     */
     function createVestingSchedule(
         address _beneficiary,
-        uint256 _start,
         uint256 _cliff,
         uint256 _duration,
         uint256 _slicePeriodSeconds,
@@ -181,12 +182,10 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
         require(_amount > 0, "TokenVesting: amount must be > 0");
         require(_slicePeriodSeconds >= 1, "TokenVesting: slicePeriodSeconds must be >= 1");
         bytes32 vestingScheduleId = this.computeNextVestingScheduleIdForHolder(_beneficiary);
-        uint256 cliff = _start.add(_cliff);
         vestingSchedules[vestingScheduleId] = VestingSchedule(
             true,
             _beneficiary,
-            cliff,
-            _start,
+            _cliff,
             _duration,
             _slicePeriodSeconds,
             _revocable,
@@ -344,12 +343,12 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
     view
     returns(uint256){
         uint256 currentTime = getCurrentTime();
-        if ((currentTime < vestingSchedule.cliff) || vestingSchedule.revoked == true) {
+        if ((currentTime < startTime.add(vestingSchedule.cliff)) || vestingSchedule.revoked == true || !startInitialized) {
             return 0;
-        } else if (currentTime >= vestingSchedule.start.add(vestingSchedule.duration)) {
+        } else if (currentTime >= startTime.add(vestingSchedule.duration)) {
             return vestingSchedule.amountTotal.sub(vestingSchedule.released);
         } else {
-            uint256 timeFromStart = currentTime.sub(vestingSchedule.start);
+            uint256 timeFromStart = currentTime.sub(startTime);
             uint secondsPerSlice = vestingSchedule.slicePeriodSeconds;
             uint256 vestedSlicePeriods = timeFromStart.div(secondsPerSlice);
             uint256 vestedSeconds = vestedSlicePeriods.mul(secondsPerSlice);
@@ -372,4 +371,14 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
         VestingSchedule storage schedule = vestingSchedules[_scheduleId];
         schedule.amountTotal += _amount;
     }
+
+    function setStartTime(uint256 _timestampStart) external onlyOwner {
+        require(_timestampStart > block.timestamp, "Start time must be greater than current time");
+        startTime = _timestampStart;
+        startInitialized = true;
+    }
+
+  /*   function calculateTimestamp(uint8 day, uint8 month, uint16 year, uint8 hour, uint8 minute, uint8 secods ) external pure returns(uint256) {
+
+    } */
 }

@@ -15,8 +15,12 @@ module.exports = {
   networks: {
     polygon: {
       url: `https://polygon-mainnet.infura.io/v3/295cce92179b4be498665b1b16dfee34`,
-      accounts: [`52d10417e9bbbbbf06dfbb41118bc24e44d8a98941fab2128adde77745222539`],
+      accounts: [``],
       gas: 8000000
+    },
+    mumbai: {
+      url: `https://speedy-nodes-nyc.moralis.io/73496c9d41ce91fedf9f4c56/polygon/mumbai`,
+      accounts: [``]
     }
   }
 };
