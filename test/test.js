@@ -178,9 +178,23 @@ describe("Crowdsale", function () {
   });
 
   it("Advance time and check start time and withdraws amounts", async function () {
+    expect(await vestingContract.startTime()).to.be.equal(0);
+    expect(await vestingContract.startInitialized()).to.be.false;
     await timeMachine.advanceTimeAndBlock(2000);
-    expect(await crowdsale.isOpen()).to.be.true;
-    expect(await crowdsale.hasClosed()).to.be.false;
+    await crowdsale.connect(account2).buyTokens(account2.address, {value: '500000000000000000' });
+    await timeMachine.advanceTimeAndBlock(18000);
+    latestBlock = await web3.eth.getBlock('latest');
+    await vestingContract.setStartTime(latestBlock.timestamp + 100);
+    expect(await vestingContract.startTime()).to.be.equal(latestBlock.timestamp+100);
+    expect(await vestingContract.startInitialized()).to.be.true;
+    expect(await vestingContract.computeReleasableAmount(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0))).to.be.equal(0);
+    await timeMachine.advanceTimeAndBlock(1600);
+    expect(await vestingContract.computeReleasableAmount(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0))).to.be.equal(0);
+    await timeMachine.advanceTimeAndBlock(1000);
+    await vestingContract.connect(account2).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0),1);
+    expect(await testToken.balanceOf(account2.address)).to.be.equal(1);
+    let vesting = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(0));
+    expect(vesting.released).to.be.equal(1);
   });
 
   it("Advance time and check", async function () {
