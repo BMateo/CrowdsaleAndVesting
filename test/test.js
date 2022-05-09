@@ -77,3 +77,59 @@ describe("TokenVesting2", function () {
   });
 });
 
+
+describe("Crowdsale", function () {
+  let account1, account2, account3, snapshotId, openingTime, closingTime;
+   
+  beforeEach(async () => {
+    let snapshot = await timeMachine.takeSnapshot();
+    snapshotId = snapshot['result'];
+  });
+
+  afterEach(async () => {
+    await timeMachine.revertToSnapshot(snapshotId);
+  });
+
+  /* Se agregan roles para el correcto funcionamiento
+   * de la whitelist y se tranfieren la cantidad de tokens
+   * que fueron destinados a esta etapa de la ICO
+   * 
+   * add roles that allows the best performance of whitelist functions 
+   * then transfer to the ICO stage the amount of tokens
+  */
+  before(async () => {
+    [account1, account2, account3] = await ethers.getSigners();
+    let latestBlock = await web3.eth.getBlock('latest');
+     openingTime = latestBlock.timestamp + 1000;
+     closingTime = latestBlock.timestamp + 20000;
+
+    const Crowdsale = await ethers.getContractFactory("Crowdsale");
+    crowdsale = await Crowdsale.deploy(15, "0x9B4A98d77c01b720F95592cd32891A7E4E1D7324", openingTime, closingTime,'1000000000000000000', 'address del contrato de vesting');
+  });
+
+
+  it("Initialized crowdsale check", async function () {
+      expect(await crowdsale.isOpen()).to.be.false;
+      expect(await crowdsale.hasClosed()).to.be.false;
+      expect(await crowdsale.rate()).to.be.equal(15);
+      expect(await crowdsale.cap()).to.be.equal('1000000000000000000');
+      expect(await crowdsale.capReached()).to.be.false;
+      expect(await crowdsale.openingTime()).to.be.equal(openingTime);
+      expect(await crowdsale.closingTime()).to.be.equal(closingTime);
+      expect(await crowdsale.weiRaised()).to.be.equal(0);
+      expect(await crowdsale.tokensSold()).to.be.equal(0);
+  });
+
+  it("Try to buy with crowdsale closed", async function () {
+    expect( crowdsale.connect(account2).buyTokens(account2.address, {value: '100000000000000000' })).to.be.reverted;
+    expect(await crowdsale.weiRaised()).to.be.equal(0);
+    expect(await crowdsale.tokensSold()).to.be.equal(0);
+  });
+
+  it("Advance time and check", async function () {
+    await timeMachine.advanceTimeAndBlock(2000);
+    expect(await crowdsale.isOpen()).to.be.true;
+    expect(await crowdsale.hasClosed()).to.be.false;
+  });
+});
+
