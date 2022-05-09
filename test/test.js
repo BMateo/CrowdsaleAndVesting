@@ -195,6 +195,17 @@ describe("Crowdsale", function () {
     expect(await testToken.balanceOf(account2.address)).to.be.equal(1);
     let vesting = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(0));
     expect(vesting.released).to.be.equal(1);
+    await timeMachine.advanceTimeAndBlock(4000);
+    await vestingContract.connect(account2).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0),7);
+    vesting = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(0));
+    expect(vesting.released).to.be.equal(8);
+    expect(vestingContract.connect(account2).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0),7)).to.be.reverted;
+  });
+
+  it("Try to buy out of bonds", async function () {
+    await timeMachine.advanceTimeAndBlock(2000);
+    expect(crowdsale.connect(account2).buyTokens(account2.address, {value: '1' })).to.be.reverted;
+    expect(crowdsale.connect(account2).buyTokens(account2.address, {value: '1000000000000000000' })).to.be.reverted; //1 matic
   });
 
   it("Advance time and check", async function () {
