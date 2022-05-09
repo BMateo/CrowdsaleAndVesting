@@ -230,7 +230,7 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      */
 
     function addPreSaleWhitelist(address _address) external whenNotPaused(){
-        require(hasRole(roles["MISTERY_BOX_ADDRESS"], msg.sender), "Error, the address does not have an Mistery Box role"); 
+        require(hasRole(roles["MISTERY_BOX_ADDRESS"], msg.sender) || hasRole(DEFAULT_ADMIN_ROLE,msg.sender), "Error, the address does not have an Mistery Box role"); 
         if(!hasRole(roles["PRESALE_WHITELIST"], _address)){
             emit eventWhitelist(_address,"Add account to presale");
             _grantRole(roles["PRESALE_WHITELIST"],_address);

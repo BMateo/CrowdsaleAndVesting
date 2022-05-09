@@ -1,6 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const timeMachine = require('ganache-time-traveler');
+const BigNumber = require('bignumber.js');
 
 describe.skip("TokenVesting2", function () {
   let Token;
@@ -99,20 +100,41 @@ describe("Crowdsale", function () {
    * then transfer to the ICO stage the amount of tokens
   */
   before(async () => {
-    [account1, account2, account3] = await ethers.getSigners();
+    [account1, account2, account3, account4, account5] = await ethers.getSigners();
     let latestBlock = await web3.eth.getBlock('latest');
-     openingTime = latestBlock.timestamp + 1000;
-     closingTime = latestBlock.timestamp + 20000;
+    openingTime = latestBlock.timestamp + 1000;
+    closingTime = latestBlock.timestamp + 20000;
+
+    
+    const Roles = await ethers.getContractFactory("Roles");
+    roles = await Roles.deploy();
+    await roles.deployed();
+    await roles.initialize("0x9B4A98d77c01b720F95592cd32891A7E4E1D7324");
+
+    const Token = await ethers.getContractFactory("MyToken");
+    testToken = await Token.deploy();
+    await testToken.deployed();
+
+    const VestingContract = await ethers.getContractFactory("VestingNfts");
+    vestingContract = await VestingContract.deploy(testToken.address, roles.address)
+    await vestingContract.deployed();
 
     const Crowdsale = await ethers.getContractFactory("Crowdsale");
-    crowdsale = await Crowdsale.deploy(15, "0x9B4A98d77c01b720F95592cd32891A7E4E1D7324", openingTime, closingTime,'1000000000000000000', 'address del contrato de vesting');
+    crowdsale = await Crowdsale.deploy(16, "0x9B4A98d77c01b720F95592cd32891A7E4E1D7324", openingTime, closingTime,'1000000000000000000',vestingContract.address ,roles.address);
+    await crowdsale.deployed();
+    
+
+    await testToken.transfer(vestingContract.address,'5000000000000000000000000');
+    await roles.addPreSaleWhitelist(account2.address);
+    await roles.addPreSaleWhitelist(account3.address);
+    await roles.grantRole(roles.getHashRole("ICO_ADDRESS"),crowdsale.address);
   });
 
 
   it("Initialized crowdsale check", async function () {
       expect(await crowdsale.isOpen()).to.be.false;
       expect(await crowdsale.hasClosed()).to.be.false;
-      expect(await crowdsale.rate()).to.be.equal(15);
+      expect(await crowdsale.rate()).to.be.equal(16);
       expect(await crowdsale.cap()).to.be.equal('1000000000000000000');
       expect(await crowdsale.capReached()).to.be.false;
       expect(await crowdsale.openingTime()).to.be.equal(openingTime);
@@ -125,6 +147,40 @@ describe("Crowdsale", function () {
     expect( crowdsale.connect(account2).buyTokens(account2.address, {value: '100000000000000000' })).to.be.reverted;
     expect(await crowdsale.weiRaised()).to.be.equal(0);
     expect(await crowdsale.tokensSold()).to.be.equal(0);
+  });
+
+  it("Try to buy without whitelist Role", async function () {
+    await timeMachine.advanceTimeAndBlock(2000);
+    expect( crowdsale.connect(account3).buyTokens(account3.address, {value: '100000000000000000' })).to.be.revertedWith("Address not whitelisted");
+  });
+
+  it("Buy correctly and check vesting", async function () {
+    await timeMachine.advanceTimeAndBlock(2000);
+    await crowdsale.connect(account2).buyTokens(account2.address, {value: '500000000000000000' });
+    expect(await crowdsale.weiRaised()).to.be.equal('500000000000000000');
+    rate = await crowdsale.rate();
+    expect(await crowdsale.tokensSold()).to.be.equal(rate.mul('500000000000000000'));
+    expect(await vestingContract.getVestingSchedulesCount()).to.be.equal(1);
+    expect(await vestingContract.getVestingSchedulesCountByBeneficiary(account2.address)).to.be.equal(1);
+    expect(await vestingContract.computeReleasableAmount(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0))).to.be.equal(0);
+    expect(vestingContract.connect(account2).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0), "20")).to.be.revertedWith("TokenVesting: cannot release tokens, not enough vested tokens");
+  });
+
+  it("Buy twice and check vesting", async function () {
+    await timeMachine.advanceTimeAndBlock(2000);
+    await crowdsale.connect(account2).buyTokens(account2.address, {value: '500000000000000000' });
+    let vesting = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(0));
+    expect(vesting.amountTotal).to.be.equal("8000000000000000000");
+    await crowdsale.connect(account2).buyTokens(account2.address, {value: '500000000000000000' });
+    vesting = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(0));
+    expect(vesting.amountTotal).to.be.equal("16000000000000000000");
+    expect(await vestingContract.getVestingSchedulesCount()).to.be.equal(1);
+  });
+
+  it("Advance time and check start time and withdraws amounts", async function () {
+    await timeMachine.advanceTimeAndBlock(2000);
+    expect(await crowdsale.isOpen()).to.be.true;
+    expect(await crowdsale.hasClosed()).to.be.false;
   });
 
   it("Advance time and check", async function () {

@@ -8,7 +8,6 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 interface IVesting {
     function createVestingSchedule(
         address _beneficiary,
-        uint256 _start,
         uint256 _cliff,
         uint256 _duration,
         uint256 _slicePeriodSeconds,
@@ -56,6 +55,15 @@ interface IVesting {
     }
 }
 
+interface IRoles {
+    function hasRole(bytes32 role, address account)
+        external
+        view
+        returns (bool);
+
+    function getHashRole(string calldata _roleName) external view returns (bytes32);
+}
+
 contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
 
     // VARIABLES *************
@@ -71,11 +79,11 @@ contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
 
     uint256 public constant lockTime = 1800 seconds;
     uint256 public constant vestingTime = 1800 seconds;
-    uint256 public constant vestingStart = 1651584434; //10:27 hs
     uint256 public constant minInvestment = 100000000000000;// 0.0001 matic
-    uint256 public constant maxInvestment = 1000000000000000; // 0.001 matic
+    uint256 public constant maxInvestment = 1000000000000000000; // 1 matic
 
     IVesting private _vestingContract;
+    IRoles private _rolesContract;
     //TokenVesting private vestingContract;
 
     /**
@@ -96,8 +104,15 @@ contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
      */
     event TokensPurchased(address indexed purchaser, address indexed beneficiary, uint256 value, uint256 amount);
 
+    /**
+     * Event for crowdsale extending
+     * @param newClosingTime new closing time
+     * @param prevClosingTime old closing time
+     */
+    event TimedCrowdsaleExtended(uint256 prevClosingTime, uint256 newClosingTime);
+
     // FUNCIONES *************
-    constructor(uint256 rate, address payable wallet,uint256 openingTime, uint256 closingTime, uint256 cap, address vestingContract) {
+    constructor(uint256 rate, address payable wallet,uint256 openingTime, uint256 closingTime, uint256 cap, address vestingContract, address rolesContract) {
         require(rate > 0, "Crowdsale: rate is 0");
         require(wallet != address(0), "Crowdsale: wallet is the zero address");
         require(vestingContract != address(0), "Crowdsale: vesting contract is the zero address");
@@ -105,6 +120,7 @@ contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
         require(closingTime > openingTime, "TimedCrowdsale: opening time is not before closing time");
         require(cap > 0, "CappedCrowdsale: cap is 0");
         _vestingContract = IVesting(vestingContract);
+        _rolesContract = IRoles(rolesContract);
         _cap = cap;
         _rate = rate;
         _wallet = wallet;
@@ -218,6 +234,7 @@ contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
      * @param weiAmount Value in wei involved in the purchase
      */
     function _preValidatePurchase(address beneficiary, uint256 weiAmount) internal onlyWhileOpen view {
+        require(_rolesContract.hasRole(_rolesContract.getHashRole("PRESALE_WHITELIST"),msg.sender),"Address not whitelisted" );
         require(beneficiary != address(0), "Crowdsale: beneficiary is the zero address");
         require(weiAmount != 0, "Crowdsale: weiAmount is 0");
         require(weiRaised() +weiAmount  <= _cap, "CappedCrowdsale: cap exceeded");
@@ -238,6 +255,7 @@ contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
 
     function _updatePurchasingState(address beneficiary, uint256 weiAmount) internal {
         alreadyInvested[beneficiary] += weiAmount;
+        tokenSold = weiAmount * _rate;
     }
 
     /**
@@ -273,7 +291,6 @@ contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
         if (beneficiaryCount == 0) {
             _vestingContract.createVestingSchedule(
                 _beneficiary,
-                vestingStart,
                 lockTime,
                 vestingTime,
                 1,
@@ -288,6 +305,23 @@ contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
             } else if (beneficiaryCount > 1){
                 revert();
             }
+    }
+
+    /**
+     * @dev Extend crowdsale.
+     * @param newClosingTime Crowdsale closing time
+     */
+    function _extendTime(uint256 newClosingTime) internal {
+        require(!hasClosed(), "TimedCrowdsale: already closed");
+        // solhint-disable-next-line max-line-length
+        require(newClosingTime > _closingTime, "TimedCrowdsale: new closing time is before current closing time");
+
+        emit TimedCrowdsaleExtended(_closingTime, newClosingTime);
+        _closingTime = newClosingTime;
+    }
+
+    function extendTime (uint256 newClosingTime) external onlyOwner whenNotPaused {
+        _extendTime(newClosingTime);
     }
 
     function pause() external onlyOwner whenNotPaused {
