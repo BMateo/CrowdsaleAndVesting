@@ -261,5 +261,27 @@ describe("Crowdsale", function () {
       console.log("Revirtio retiro de tokens por falta de tokens vesteados");
     }
   });
+
+  it("Buy & Withdraw with 2 diff accounts", async function () {
+    await vestingContract.setStartTime(latestBlock.timestamp + 20000);
+    await timeMachine.advanceTimeAndBlock(10000);
+
+    expect(await crowdsale.isOpen()).to.be.true;
+    await crowdsale.connect(account2).buyTokens(account2.address, {value: '500000000000000000' });
+    await crowdsale.connect(account3).buyTokens(account3.address, {value: '400000000000000000' });
+    await timeMachine.advanceTimeAndBlock(10000);
+    expect(await crowdsale.hasClosed()).to.be.true;
+    expect(await vestingContract.startInitialized()).to.be.true;
+    await timeMachine.advanceTimeAndBlock(1000);
+    vesting = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(0));
+    expect(vesting.amountTotal).to.be.equal("8000000000000000000");
+    let releasableAmount = await vestingContract.computeReleasableAmount(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0));
+    let releasableAmount2 = await vestingContract.computeReleasableAmount(vestingContract.computeVestingScheduleIdForAddressAndIndex(account3.address,0));
+    await vestingContract.connect(account2).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0),releasableAmount);
+    await vestingContract.connect(account3).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account3.address,0),releasableAmount2);
+    
+  });
+
+
 });
 
