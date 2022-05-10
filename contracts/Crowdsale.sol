@@ -77,8 +77,8 @@ contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
     uint256 private tokenSold;
     mapping(address => uint256) private alreadyInvested;
 
-    uint256 public constant lockTime = 1800 seconds;
-    uint256 public constant vestingTime = 1800 seconds;
+    uint256 public constant lockTime = 1000 seconds;
+    uint256 public constant vestingTime = 2000 seconds;
     uint256 public constant minInvestment = 100000000000000;// 0.0001 matic
     uint256 public constant maxInvestment = 1000000000000000000; // 1 matic
 

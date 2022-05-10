@@ -96,7 +96,7 @@ describe.skip("TokenVesting2", function () {
 
 describe("Crowdsale", function () {
   //init vars, we use time machine to advance time on blockchain test
-  let account1, account2, account3, snapshotId, openingTime, closingTime;
+  let account1, account2, account3, snapshotId, openingTime, closingTime, latestBlock;
    
   beforeEach(async () => {
     let snapshot = await timeMachine.takeSnapshot();
@@ -105,6 +105,7 @@ describe("Crowdsale", function () {
 
   afterEach(async () => {
     await timeMachine.revertToSnapshot(snapshotId);
+    latestBlock = await web3.eth.getBlock('latest');
   });
 
   /* Se agregan roles para el correcto funcionamiento
@@ -116,7 +117,7 @@ describe("Crowdsale", function () {
   */
   before(async () => {
     [account1, account2, account3, account4, account5] = await ethers.getSigners();
-    let latestBlock = await web3.eth.getBlock('latest');
+    latestBlock = await web3.eth.getBlock('latest');
     openingTime = latestBlock.timestamp + 1000;
     closingTime = latestBlock.timestamp + 20000;
 
@@ -203,17 +204,17 @@ describe("Crowdsale", function () {
     expect(await vestingContract.startTime()).to.be.equal(latestBlock.timestamp+100);
     expect(await vestingContract.startInitialized()).to.be.true;
     expect(await vestingContract.computeReleasableAmount(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0))).to.be.equal(0);
-    await timeMachine.advanceTimeAndBlock(1600);
+    await timeMachine.advanceTimeAndBlock(1000);
     expect(await vestingContract.computeReleasableAmount(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0))).to.be.equal(0);
     await timeMachine.advanceTimeAndBlock(1000);
-    await vestingContract.connect(account2).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0),1);
-    expect(await testToken.balanceOf(account2.address)).to.be.equal(1);
+    await vestingContract.connect(account2).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0),"1000000000000000000");
+    expect(await testToken.balanceOf(account2.address)).to.be.equal("1000000000000000000");
     let vesting = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(0));
-    expect(vesting.released).to.be.equal(1);
+    expect(vesting.released).to.be.equal("1000000000000000000");
     await timeMachine.advanceTimeAndBlock(4000);
-    await vestingContract.connect(account2).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0),7);
+    await vestingContract.connect(account2).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0),"7000000000000000000");
     vesting = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(0));
-    expect(vesting.released).to.be.equal(8);
+    expect(vesting.released).to.be.equal("8000000000000000000");
     expect(vestingContract.connect(account2).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0),7)).to.be.reverted;
   });
 
@@ -230,11 +231,35 @@ describe("Crowdsale", function () {
   });
 
   it("Extend ico time and try to buy", async function () {
-      await crowdsale.extendTime("newClosingtime");
-      let closed = await crowdsale.hasClosed();
-      await console.log(closed);
+      await crowdsale.extendTime(closingTime + 10000);
+      await timeMachine.advanceTimeAndBlock(25000);
+      expect(await crowdsale.hasClosed()).to.be.false;
       await crowdsale.connect(account2).buyTokens(account2.address, {value: '500000000000000000' });
+  });
 
+  it("Try to buy passed closingTime", async function () {
+    await timeMachine.advanceTimeAndBlock(25000);
+    expect(await crowdsale.hasClosed()).to.be.true;
+    expect(crowdsale.connect(account2).buyTokens(account2.address, {value: '500000000000000000' })).to.be.reverted;
+  });
+
+  it("Try to withdraw twice", async function () {
+    await vestingContract.setStartTime(latestBlock.timestamp + 20000);
+    await timeMachine.advanceTimeAndBlock(10000);
+    expect(await crowdsale.isOpen()).to.be.true;
+    await crowdsale.connect(account2).buyTokens(account2.address, {value: '500000000000000000' });
+    await timeMachine.advanceTimeAndBlock(10000);
+    expect(await crowdsale.hasClosed()).to.be.true;
+    expect(await vestingContract.startInitialized()).to.be.true;
+    await timeMachine.advanceTimeAndBlock(1000);
+    vesting = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(0));
+    expect(vesting.amountTotal).to.be.equal("8000000000000000000");
+    let releasableAmount = await vestingContract.computeReleasableAmount(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0));
+    try {for(let i=0 ; i<5 ; i++){
+      await vestingContract.connect(account2).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0),"1000000000000000000");
+    } } catch {
+      console.log("Revirtio retiro de tokens por falta de tokens vesteados");
+    }
   });
 });
 
