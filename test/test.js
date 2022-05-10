@@ -3,6 +3,7 @@ const { ethers } = require("hardhat");
 const timeMachine = require('ganache-time-traveler');
 const BigNumber = require('bignumber.js');
 
+
 describe.skip("TokenVesting2", function () {
   let Token;
   let testToken;
@@ -13,11 +14,18 @@ describe.skip("TokenVesting2", function () {
   let addrs;
 
   before(async function () {
+/*Token = address for token contract
+  TokenVesting= address for vesting contract
+  Roles = address for roles contract
+*/
     Token = await ethers.getContractFactory("MyToken");
     TokenVesting = await ethers.getContractFactory("MockTokenVesting");
     Roles = await ethers.getContractFactory("Roles");
 
-   
+   /* 
+    Deploy the contracts and transfer tokens for ido contract
+    then set the ico rol for an address
+   */
     roles = await Roles.deploy();
     await roles.deployed();
     await roles.initialize("0xe62E317325934667156028966830588385021956");
@@ -50,8 +58,13 @@ describe.skip("TokenVesting2", function () {
     });
   }); */
 
+
   describe("Start Setter", function () {
+    
     it("Start time should be uninitialized", async function () {
+      /* 
+          Create a vesting schedule before startTime and try to release the tokens
+      */
         await vesting.connect(addr1).createVestingSchedule(addr2.address,3600,5200,1,true,'500000000000000000000000',addr1.address);
         let schedule = await vesting.getLastVestingScheduleForHolder(addr2.address);
         let scheduleId = await vesting.computeVestingScheduleIdForAddressAndIndex(addr2.address,0);
@@ -62,6 +75,7 @@ describe.skip("TokenVesting2", function () {
     });
 
     it("Cannot withdraw inside lock time", async function () {
+      //Try to release the tokens inside lock time, it will throw an error that is reverted
         let scheduleId = await vesting.computeVestingScheduleIdForAddressAndIndex(addr2.address,0);
         await vesting.setStartTime('1651854200');
         expect(vesting.release(scheduleId, '10000')).to.be.reverted;
