@@ -228,5 +228,13 @@ describe("Crowdsale", function () {
     expect(await crowdsale.isOpen()).to.be.true;
     expect(await crowdsale.hasClosed()).to.be.false;
   });
+
+  it("Extend ico time and try to buy", async function () {
+      await crowdsale.extendTime("newClosingtime");
+      let closed = await crowdsale.hasClosed();
+      await console.log(closed);
+      await crowdsale.connect(account2).buyTokens(account2.address, {value: '500000000000000000' });
+
+  });
 });
 
