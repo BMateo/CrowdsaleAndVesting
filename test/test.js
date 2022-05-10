@@ -95,6 +95,7 @@ describe.skip("TokenVesting2", function () {
 
 
 describe("Crowdsale", function () {
+  //init vars, we use time machine to advance time on blockchain test
   let account1, account2, account3, snapshotId, openingTime, closingTime;
    
   beforeEach(async () => {
@@ -119,7 +120,7 @@ describe("Crowdsale", function () {
     openingTime = latestBlock.timestamp + 1000;
     closingTime = latestBlock.timestamp + 20000;
 
-    
+    //Deploy contracts
     const Roles = await ethers.getContractFactory("Roles");
     roles = await Roles.deploy();
     await roles.deployed();
@@ -137,7 +138,7 @@ describe("Crowdsale", function () {
     crowdsale = await Crowdsale.deploy(16, "0x9B4A98d77c01b720F95592cd32891A7E4E1D7324", openingTime, closingTime,'1000000000000000000',vestingContract.address ,roles.address);
     await crowdsale.deployed();
     
-
+    //add addresses to whitelist and grant the role for ico
     await testToken.transfer(vestingContract.address,'5000000000000000000000000');
     await roles.addPreSaleWhitelist(account2.address);
     await roles.addPreSaleWhitelist(account3.address);
