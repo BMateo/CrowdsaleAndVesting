@@ -331,4 +331,9 @@ contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
     function unpause() external onlyOwner whenPaused {
         _unpause();
     }
+
+    function withdraw() external onlyOwner {
+        (bool success,) = msg.sender.call{value: address(this).balance}("");
+        require(success, "Forward funds fail");
+    }
 }
