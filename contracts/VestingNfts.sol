@@ -180,7 +180,6 @@ contract VestingNfts is Ownable, ReentrancyGuard{
         require(_duration > 0, "TokenVesting: duration must be > 0");
         require(_amount > 0, "TokenVesting: amount must be > 0");
         require(_slicePeriodSeconds >= 1, "TokenVesting: slicePeriodSeconds must be >= 1");
-        address _creator = msg.sender == owner() ? owner() : address(this); 
         bytes32 vestingScheduleId = this.computeNextVestingScheduleIdForHolder(_beneficiary);
         vestingSchedules[vestingScheduleId] = VestingSchedule(
             true,
@@ -192,7 +191,7 @@ contract VestingNfts is Ownable, ReentrancyGuard{
             _amount,
             0,
             false,
-            _creator
+            msg.sender
         );
         vestingSchedulesTotalAmount = vestingSchedulesTotalAmount.add(_amount);
         vestingSchedulesIds.push(vestingScheduleId);

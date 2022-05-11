@@ -35,8 +35,6 @@ interface IVesting {
         address beneficiary;
         // cliff period in seconds
         uint256 cliff;
-        // start time of the vesting period
-        uint256 start;
         // duration of the vesting period in seconds
         uint256 duration;
         // duration of a slice period for the vesting in seconds

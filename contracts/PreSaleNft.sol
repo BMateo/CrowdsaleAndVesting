@@ -5,6 +5,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 
+import "hardhat/console.sol";
+
 interface IVesting {
     function createVestingSchedule(
         address _beneficiary,
@@ -35,8 +37,6 @@ interface IVesting {
         address beneficiary;
         // cliff period in seconds
         uint256 cliff;
-        // start time of the vesting period
-        uint256 start;
         // duration of the vesting period in seconds
         uint256 duration;
         // duration of a slice period for the vesting in seconds
@@ -196,6 +196,7 @@ contract PreSaleNft is Ownable, ReentrancyGuard, Pausable {
     }
 
     function tokensSold() public view returns (uint256){
+        
         return tokenSold;
     }
 
@@ -299,7 +300,7 @@ contract PreSaleNft is Ownable, ReentrancyGuard, Pausable {
             );
             return;
         } else if (beneficiaryCount == 1) {
-             IVesting.VestingSchedule memory  vesting = _vestingContract.getVestingScheduleByAddressAndIndex(_beneficiary,0);
+             IVesting.VestingSchedule memory vesting = _vestingContract.getVestingScheduleByAddressAndIndex(_beneficiary,0);
             if(vesting.creator == address(this)){
                 _vestingContract.addTotalAmount(_amount,_vestingContract.computeVestingScheduleIdForAddressAndIndex(_beneficiary, 0));
                 return;
@@ -312,8 +313,9 @@ contract PreSaleNft is Ownable, ReentrancyGuard, Pausable {
                 true,
                 _amount
             );
-            }
             return;
+            }
+            
             } else {
                 for(uint i ; i< beneficiaryCount ; i++){
                     IVesting.VestingSchedule memory  vesting = _vestingContract.getVestingScheduleByAddressAndIndex(_beneficiary,i);
