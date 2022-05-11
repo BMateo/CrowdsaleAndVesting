@@ -48,8 +48,8 @@ contract VestingNfts is Ownable, ReentrancyGuard{
         uint256  released;
         // whether or not the vesting has been revoked
         bool revoked;
-        // address of the contract that create schedule
-        address stage;
+
+        address creator;
     }
 
     // address of the ERC20 token
@@ -169,8 +169,7 @@ contract VestingNfts is Ownable, ReentrancyGuard{
         uint256 _duration,
         uint256 _slicePeriodSeconds,
         bool _revocable,
-        uint256 _amount,
-        address _stageContract
+        uint256 _amount
     )
         public {
             require(_roles.hasRole(_roles.getHashRole("ICO_ADDRESS"),msg.sender) || _roles.hasRole(DEFAULT_ADMIN_ROLE,msg.sender),"Caller is not vesting contract nor the owner");
@@ -181,6 +180,7 @@ contract VestingNfts is Ownable, ReentrancyGuard{
         require(_duration > 0, "TokenVesting: duration must be > 0");
         require(_amount > 0, "TokenVesting: amount must be > 0");
         require(_slicePeriodSeconds >= 1, "TokenVesting: slicePeriodSeconds must be >= 1");
+        address _creator = msg.sender == owner() ? owner() : address(this); 
         bytes32 vestingScheduleId = this.computeNextVestingScheduleIdForHolder(_beneficiary);
         vestingSchedules[vestingScheduleId] = VestingSchedule(
             true,
@@ -192,7 +192,7 @@ contract VestingNfts is Ownable, ReentrancyGuard{
             _amount,
             0,
             false,
-            _stageContract
+            _creator
         );
         vestingSchedulesTotalAmount = vestingSchedulesTotalAmount.add(_amount);
         vestingSchedulesIds.push(vestingScheduleId);
@@ -370,6 +370,7 @@ contract VestingNfts is Ownable, ReentrancyGuard{
         require(_roles.hasRole(_roles.getHashRole("ICO_ADDRESS"), msg.sender));
         VestingSchedule storage schedule = vestingSchedules[_scheduleId];
         schedule.amountTotal += _amount;
+        vestingSchedulesTotalAmount = vestingSchedulesTotalAmount.add(_amount);
     }
 
     function setStartTime(uint256 _timestampStart) external onlyOwner {
@@ -378,7 +379,4 @@ contract VestingNfts is Ownable, ReentrancyGuard{
         startInitialized = true;
     }
 
-  /*   function calculateTimestamp(uint8 day, uint8 month, uint16 year, uint8 hour, uint8 minute, uint8 secods ) external pure returns(uint256) {
-
-    } */
 }

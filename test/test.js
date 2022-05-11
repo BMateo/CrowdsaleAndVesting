@@ -135,15 +135,20 @@ describe("Crowdsale", function () {
     vestingContract = await VestingContract.deploy(testToken.address, roles.address)
     await vestingContract.deployed();
 
-    const Crowdsale = await ethers.getContractFactory("Crowdsale");
-    crowdsale = await Crowdsale.deploy(16, "0x9B4A98d77c01b720F95592cd32891A7E4E1D7324", openingTime, closingTime,'1000000000000000000',vestingContract.address ,roles.address);
+    const Crowdsale = await ethers.getContractFactory("PreSaleNft");
+    crowdsale = await Crowdsale.deploy(16, "0x9B4A98d77c01b720F95592cd32891A7E4E1D7324", openingTime, closingTime,'10000000000000000000',vestingContract.address ,roles.address);
     await crowdsale.deployed();
+
+    const Crowdsale2 = await ethers.getContractFactory("GeneralPublic");
+    crowdsale2 = await Crowdsale2.deploy(16, "0x9B4A98d77c01b720F95592cd32891A7E4E1D7324", openingTime, closingTime,'10000000000000000000',vestingContract.address);
+    await crowdsale2.deployed();
     
     //add addresses to whitelist and grant the role for ico
     await testToken.transfer(vestingContract.address,'5000000000000000000000000');
     await roles.addPreSaleWhitelist(account2.address);
     await roles.addPreSaleWhitelist(account3.address);
     await roles.grantRole(roles.getHashRole("ICO_ADDRESS"),crowdsale.address);
+    await roles.grantRole(roles.getHashRole("ICO_ADDRESS"),crowdsale2.address);
   });
 
 
@@ -151,7 +156,7 @@ describe("Crowdsale", function () {
       expect(await crowdsale.isOpen()).to.be.false;
       expect(await crowdsale.hasClosed()).to.be.false;
       expect(await crowdsale.rate()).to.be.equal(16);
-      expect(await crowdsale.cap()).to.be.equal('1000000000000000000');
+      expect(await crowdsale.cap()).to.be.equal('10000000000000000000');
       expect(await crowdsale.capReached()).to.be.false;
       expect(await crowdsale.openingTime()).to.be.equal(openingTime);
       expect(await crowdsale.closingTime()).to.be.equal(closingTime);
@@ -282,6 +287,57 @@ describe("Crowdsale", function () {
     
   });
 
+  it("Buy & Withdraw in different stages", async function () {
+    await timeMachine.advanceTimeAndBlock(5000);
+    await crowdsale.connect(account2).buyTokens(account2.address, {value: '500000000000000000' });
+    await crowdsale.connect(account2).buyTokens(account2.address, {value: '500000000000000000' });
+    await crowdsale.connect(account3).buyTokens(account3.address, {value: '500000000000000000' });
+    await crowdsale.connect(account3).buyTokens(account3.address, {value: '500000000000000000' });
+    vesting0 = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(0));
+    expect( vesting0.amountTotal).to.be.equal("16000000000000000000");
+    vesting1 = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(1));
+    expect( vesting1.amountTotal).to.be.equal("16000000000000000000");
 
+    await crowdsale2.connect(account4).buyTokens(account4.address, {value: '500000000000000000' });
+    await crowdsale2.connect(account4).buyTokens(account4.address, {value: '500000000000000000' });
+    await crowdsale2.connect(account5).buyTokens(account5.address, {value: '500000000000000000' });
+    await crowdsale2.connect(account5).buyTokens(account5.address, {value: '500000000000000000' });
+    vesting2 = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(2));
+    expect(vesting2.amountTotal).to.be.equal("16000000000000000000");
+    vesting3 = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(3));
+    expect(vesting3.amountTotal).to.be.equal("16000000000000000000");
+
+    expect(await vestingContract.getVestingSchedulesCount()).to.be.equal(4);
+    await vestingContract.setStartTime(latestBlock.timestamp + 20000);
+    await timeMachine.advanceTimeAndBlock(15000);
+    await timeMachine.advanceTimeAndBlock(2100);
+    await vestingContract.connect(account2).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account2.address,0),"16000000000000000000");
+    await vestingContract.connect(account3).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account3.address,0),"16000000000000000000");
+    await vestingContract.connect(account4).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account4.address,0),"16000000000000000000");
+    await vestingContract.connect(account5).release(vestingContract.computeVestingScheduleIdForAddressAndIndex(account5.address,0),"16000000000000000000");
+
+    vesting0 = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(0));
+    expect(vesting0.released).to.be.equal("16000000000000000000");
+    vesting1 = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(1));
+    expect(vesting1.released).to.be.equal("16000000000000000000");
+    vesting2 = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(2));
+    expect(vesting2.released).to.be.equal("16000000000000000000");
+    vesting3 = await vestingContract.getVestingSchedule(vestingContract.getVestingIdAtIndex(3));
+    expect(vesting3.released).to.be.equal("16000000000000000000");
+
+  });
+
+  it("Buy after several schemas created by owner", async function () {
+    await vestingContract.createVestingSchedule(account2.address,1000, 2000, 1, true, '16000000000000000000');
+    await vestingContract.createVestingSchedule(account2.address,1000, 2000, 1, true, '16000000000000000000');
+    await vestingContract.createVestingSchedule(account2.address,1000, 2000, 1, true, '16000000000000000000');
+    expect(await vestingContract.getVestingSchedulesCount()).to.be.equal(3);
+    await timeMachine.advanceTimeAndBlock(2000);
+    await crowdsale.connect(account2).buyTokens(account2.address, {value: '500000000000000000' });
+    await crowdsale.connect(account2).buyTokens(account2.address, {value: '500000000000000000' });
+    expect(await vestingContract.getVestingSchedulesCountByBeneficiary(account2.address)).to.be.equal(4);
+
+
+  });
 });
 

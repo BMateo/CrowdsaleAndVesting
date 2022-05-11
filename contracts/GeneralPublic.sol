@@ -12,8 +12,7 @@ interface IVesting {
         uint256 _duration,
         uint256 _slicePeriodSeconds,
         bool _revocable,
-        uint256 _amount,
-        address _stage
+        uint256 _amount
     ) external;
 
     function getVestingSchedulesCountByBeneficiary(address _beneficiary)
@@ -51,20 +50,12 @@ interface IVesting {
         // whether or not the vesting has been revoked
         bool revoked;
         // address of the contract that create schedule
-        address stage;
+        address creator;
     }
 }
 
-interface IRoles {
-    function hasRole(bytes32 role, address account)
-        external
-        view
-        returns (bool);
 
-    function getHashRole(string calldata _roleName) external view returns (bytes32);
-}
-
-contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
+contract GeneralPublic is Ownable, ReentrancyGuard, Pausable {
 
     // VARIABLES *************
     address payable private _wallet;
@@ -77,14 +68,11 @@ contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
     uint256 private tokenSold;
     mapping(address => uint256) private alreadyInvested;
 
-    uint256 public constant lockTime = 1000 seconds;
     uint256 public constant vestingTime = 2000 seconds;
     uint256 public constant minInvestment = 100000000000000;// 0.0001 matic
     uint256 public constant maxInvestment = 1000000000000000000; // 1 matic
 
     IVesting private _vestingContract;
-    IRoles private _rolesContract;
-    //TokenVesting private vestingContract;
 
     /**
      * @dev Reverts if not in crowdsale time range.
@@ -112,7 +100,7 @@ contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
     event TimedCrowdsaleExtended(uint256 prevClosingTime, uint256 newClosingTime);
 
     // FUNCIONES *************
-    constructor(uint256 rate, address payable wallet,uint256 openingTime, uint256 closingTime, uint256 cap, address vestingContract, address rolesContract) {
+    constructor(uint256 rate, address payable wallet,uint256 openingTime, uint256 closingTime, uint256 cap, address vestingContract) {
         require(rate > 0, "Crowdsale: rate is 0");
         require(wallet != address(0), "Crowdsale: wallet is the zero address");
         require(vestingContract != address(0), "Crowdsale: vesting contract is the zero address");
@@ -120,7 +108,6 @@ contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
         require(closingTime > openingTime, "TimedCrowdsale: opening time is not before closing time");
         require(cap > 0, "CappedCrowdsale: cap is 0");
         _vestingContract = IVesting(vestingContract);
-        _rolesContract = IRoles(rolesContract);
         _cap = cap;
         _rate = rate;
         _wallet = wallet;
@@ -234,7 +221,6 @@ contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
      * @param weiAmount Value in wei involved in the purchase
      */
     function _preValidatePurchase(address beneficiary, uint256 weiAmount) internal onlyWhileOpen view {
-        require(_rolesContract.hasRole(_rolesContract.getHashRole("PRESALE_WHITELIST"),msg.sender),"Address not whitelisted" );
         require(beneficiary != address(0), "Crowdsale: beneficiary is the zero address");
         require(weiAmount != 0, "Crowdsale: weiAmount is 0");
         require(weiRaised() +weiAmount  <= _cap, "CappedCrowdsale: cap exceeded");
@@ -291,19 +277,44 @@ contract Crowdsale is Ownable, ReentrancyGuard, Pausable {
         if (beneficiaryCount == 0) {
             _vestingContract.createVestingSchedule(
                 _beneficiary,
-                lockTime,
+                0,
                 vestingTime,
                 1,
                 true,
-                _amount,
-                address(this)
+                _amount
             );
             return;
         } else if (beneficiaryCount == 1) {
-            _vestingContract.addTotalAmount(_amount,_vestingContract.computeVestingScheduleIdForAddressAndIndex(_beneficiary, 0));
+            if(_vestingContract.getVestingScheduleByAddressAndIndex(_beneficiary,0).creator == address(this)){
+                _vestingContract.addTotalAmount(_amount,_vestingContract.computeVestingScheduleIdForAddressAndIndex(_beneficiary, 0));
+                return;
+            } else if(_vestingContract.getVestingScheduleByAddressAndIndex(_beneficiary,0).creator == owner()){
+                _vestingContract.createVestingSchedule(
+                _beneficiary,
+                0,
+                vestingTime,
+                1,
+                true,
+                _amount
+            );
             return;
+            }
             } else if (beneficiaryCount > 1){
-                revert();
+                for(uint i ; i< beneficiaryCount ; i++){
+                    if(_vestingContract.getVestingScheduleByAddressAndIndex(_beneficiary,i).creator == address(this)){
+                        _vestingContract.addTotalAmount(_amount,_vestingContract.computeVestingScheduleIdForAddressAndIndex(_beneficiary, i));
+                        return;
+                    }
+                }
+                _vestingContract.createVestingSchedule(
+                _beneficiary,
+                0,
+                vestingTime,
+                1,
+                true,
+                _amount
+            );
+            return;
             }
     }
 
