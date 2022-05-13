@@ -66,6 +66,8 @@ contract VestingNfts is Ownable, ReentrancyGuard{
 
     event Released(uint256 amount);
     event Revoked();
+    event CreatedSchedule(address beneficiary, uint256 amount);
+    event UpdatedSchedule(address beneficiary, bytes32 scheduleId);
 
     /**
     * @dev Reverts if no vesting schedule matches the passed identifier.
@@ -197,6 +199,7 @@ contract VestingNfts is Ownable, ReentrancyGuard{
         vestingSchedulesIds.push(vestingScheduleId);
         uint256 currentVestingCount = holdersVestingCount[_beneficiary];
         holdersVestingCount[_beneficiary] = currentVestingCount.add(1);
+        emit CreatedSchedule(_beneficiary, _amount);
     }
 
     /**
@@ -255,6 +258,7 @@ contract VestingNfts is Ownable, ReentrancyGuard{
         address payable beneficiaryPayable = payable(vestingSchedule.beneficiary);
         vestingSchedulesTotalAmount = vestingSchedulesTotalAmount.sub(amount);
         _token.safeTransfer(beneficiaryPayable, amount);
+        emit Released(amount);
     }
 
     /**
@@ -370,6 +374,7 @@ contract VestingNfts is Ownable, ReentrancyGuard{
         VestingSchedule storage schedule = vestingSchedules[_scheduleId];
         schedule.amountTotal += _amount;
         vestingSchedulesTotalAmount = vestingSchedulesTotalAmount.add(_amount);
+        emit UpdatedSchedule(schedule.beneficiary, _scheduleId);
     }
 
     function setStartTime(uint256 _timestampStart) external onlyOwner {

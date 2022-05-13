@@ -14,7 +14,7 @@ async function main() {
   // await hre.run('compile');
 
   // We get the contract to deploy
-  const Vesting = await hre.ethers.getContractFactory("TokenVestingModificado");
+  const Vesting = await hre.ethers.getContractFactory("VestingNfts");
   const vesting = await Vesting.deploy('0xbE1a69e88aBfa44c422323a249985A472032e746','0x5f987925FB47E7c3121D21063242D982bEa10969');
 
   await vesting.deployed();

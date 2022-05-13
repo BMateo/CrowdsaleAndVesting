@@ -5,8 +5,6 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 
-import "hardhat/console.sol";
-
 interface IVesting {
     function createVestingSchedule(
         address _beneficiary,
@@ -127,6 +125,9 @@ contract PreSaleNft is Ownable, ReentrancyGuard, Pausable {
         _openingTime = openingTime;
         _closingTime = closingTime;
     }
+
+    receive() external payable {}
+    
 
     /**
      * @return the address where funds are collected.
@@ -362,6 +363,7 @@ contract PreSaleNft is Ownable, ReentrancyGuard, Pausable {
     }
 
     function withdraw() external onlyOwner {
+        require(address(this).balance > 0, "Contract has no balances");
         (bool success,) = msg.sender.call{value: address(this).balance}("");
         require(success, "Forward funds fail");
     }

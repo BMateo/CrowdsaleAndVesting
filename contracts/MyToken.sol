@@ -55,6 +55,10 @@ contract MyToken is ERC20, Pausable, Ownable, ReentrancyGuard {
         excludedFromTax[_address] = true;
     }
 
+    function includeInTax(address _address) external onlyOwner whenNotPaused {
+        excludedFromTax[_address] = false;
+    }
+
     function enableTax() public onlyOwner whenNotPaused {
         taxEnable = true;
     }
