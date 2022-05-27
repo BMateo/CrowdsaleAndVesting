@@ -21,11 +21,11 @@ module.exports = {
     },
     mumbai: {
       url: `https://speedy-nodes-nyc.moralis.io/73496c9d41ce91fedf9f4c56/polygon/mumbai`,
-      accounts: ['083786714cfb324a8f11922a6104eaff5d6a427a81a5c8167477b8d5200c2ca9']
+      accounts: ['']
     },
     binanceTestnet: {
       url: `https://data-seed-prebsc-1-s1.binance.org:8545/`,
-      accounts: ['083786714cfb324a8f11922a6104eaff5d6a427a81a5c8167477b8d5200c2ca9']
+      accounts: ['']
     }
   }
 };
