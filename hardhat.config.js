@@ -21,11 +21,11 @@ module.exports = {
     },
     mumbai: {
       url: `https://speedy-nodes-nyc.moralis.io/73496c9d41ce91fedf9f4c56/polygon/mumbai`,
-      accounts: ['']
+      accounts: []
     },
     binanceTestnet: {
       url: `https://data-seed-prebsc-1-s1.binance.org:8545/`,
-      accounts: ['']
+      accounts: []
     }
   }
 };

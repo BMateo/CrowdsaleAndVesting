@@ -52,8 +52,34 @@ interface IVesting {
     }
 }
 
+interface IRoles {
+    function hasRole(bytes32 role, address account)
+        external
+        view
+        returns (bool);
 
-contract GeneralPublic is Ownable, ReentrancyGuard, Pausable {
+    function getHashRole(string calldata _roleName) external view returns (bytes32);
+}
+
+interface IOracle {
+    function latestAnswer() external view returns(uint256);
+    function decimals() external view returns(uint256);
+}
+
+ interface UniswapV2Router02 {
+     function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline)
+        external
+        payable
+        returns (uint[] memory amounts);
+}
+
+ interface ERC20 {
+     function transfer(address to, uint value) external returns (bool);
+     function balanceOf(address owner) external view returns (uint);
+     function decimals() external view returns(uint256);
+}
+
+contract Etapa2 is Ownable, ReentrancyGuard, Pausable {
 
     // VARIABLES *************
     address payable private _wallet;
@@ -64,13 +90,25 @@ contract GeneralPublic is Ownable, ReentrancyGuard, Pausable {
     uint256 private _closingTime;
     uint256 private _cap;
     uint256 private tokenSold;
-    mapping(address => uint256) private alreadyInvested;
+    mapping(address => uint256) public alreadyInvested;
 
-    uint256 public constant vestingTime = 2000 seconds;
-    uint256 public constant minInvestment = 100000000000000;// 0.0001 matic
-    uint256 public constant maxInvestment = 1000000000000000000; // 1 matic
+    uint256 public constant lockTime = 2000 seconds;
+    uint256 public constant vestingTime = 4000 seconds;
+    uint256 public  minInvestment = 100000000000000;// 0.0001 matic
+    uint256 public  maxInvestment = 100000000000000000000; // 1 matic
+    uint256 public tokenPriceUSD; //200000000000000000
+    //slipagge porcentual se divide por 1000, 1 decimal, el 100% es 1000
+    uint256 private slippagePorcentual = 10; //1%
+    //oracle address
+    address public  oracleAddress = 0xAB594600376Ec9fD91F8e885dADF0CE036862dE0; //matic/usd
+    address public  TOKENADDRESS = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174; //usdc
+    address public constant MATIC = 0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270; //WMATIC
+    address public  ROUTER = 0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff; //QUICKSWAP ROUTER
 
+    IOracle private _oracle;
     IVesting private _vestingContract;
+    IRoles private _rolesContract; 
+    UniswapV2Router02 private _router;
 
     /**
      * @dev Reverts if not in crowdsale time range.
@@ -98,20 +136,25 @@ contract GeneralPublic is Ownable, ReentrancyGuard, Pausable {
     event TimedCrowdsaleExtended(uint256 prevClosingTime, uint256 newClosingTime);
 
     // FUNCIONES *************
-    constructor(uint256 rate, address payable wallet,uint256 openingTime, uint256 closingTime, uint256 cap, address vestingContract) {
-        require(rate > 0, "Crowdsale: rate is 0");
+    constructor(address payable wallet,uint256 openingTime, uint256 closingTime, uint256 cap, uint256 initialPrice,address vestingContract, address rolesContract) {
         require(wallet != address(0), "Crowdsale: wallet is the zero address");
         require(vestingContract != address(0), "Crowdsale: vesting contract is the zero address");
         require(openingTime >= block.timestamp, "TimedCrowdsale: opening time is before current time");
         require(closingTime > openingTime, "TimedCrowdsale: opening time is not before closing time");
         require(cap > 0, "CappedCrowdsale: cap is 0");
         _vestingContract = IVesting(vestingContract);
+        _rolesContract = IRoles(rolesContract);
+        tokenPriceUSD = initialPrice;
+        _oracle = IOracle(oracleAddress);
+        _router = UniswapV2Router02(ROUTER);
         _cap = cap;
-        _rate = rate;
         _wallet = wallet;
         _openingTime = openingTime;
         _closingTime = closingTime;
     }
+
+    receive() external payable {}
+    
 
     /**
      * @return the address where funds are collected.
@@ -124,7 +167,10 @@ contract GeneralPublic is Ownable, ReentrancyGuard, Pausable {
      * @return the number of token units a buyer gets per wei.
      */
     function rate() public view returns (uint256) {
-        return _rate;
+        //maticPrice in 8 decimals, shift to 18 decimals
+        uint256 maticPrice = _oracle.latestAnswer() * 10**_oracleFactor(); 
+        //represent the result in weis
+        return maticPrice * 10**18 / tokenPriceUSD;
     }
 
     /**
@@ -219,9 +265,10 @@ contract GeneralPublic is Ownable, ReentrancyGuard, Pausable {
      * @param weiAmount Value in wei involved in the purchase
      */
     function _preValidatePurchase(address beneficiary, uint256 weiAmount) internal onlyWhileOpen view {
+        require(_rolesContract.hasRole(_rolesContract.getHashRole("PRESALE_WHITELIST"),msg.sender),"Address not whitelisted" );
         require(beneficiary != address(0), "Crowdsale: beneficiary is the zero address");
         require(weiAmount != 0, "Crowdsale: weiAmount is 0");
-        require(weiRaised() +weiAmount  <= _cap, "CappedCrowdsale: cap exceeded");
+        require(weiRaised() + weiAmount  <= _cap, "CappedCrowdsale: cap exceeded");
         uint256 _existingContribution = alreadyInvested[beneficiary];
         uint256 _newContribution = _existingContribution + weiAmount;
         require(_newContribution >= minInvestment && _newContribution <= maxInvestment);
@@ -235,18 +282,35 @@ contract GeneralPublic is Ownable, ReentrancyGuard, Pausable {
      */
     function _processPurchase(address beneficiary, uint256 tokenAmount) internal {
         _updateScheduleAmount(beneficiary, tokenAmount);
+        tokenSold += tokenAmount;
     }
 
     function _updatePurchasingState(address beneficiary, uint256 weiAmount) internal {
         alreadyInvested[beneficiary] += weiAmount;
-        tokenSold = weiAmount * _rate;
+        //maticToUsdPrice in 8 decimals, shift to 18 decimals
+        uint256 maticToTokenPrice =  _oracle.latestAnswer() * 10**_oracleFactor();
+        //usdcAmount is shifted to 6 decimals
+        uint256 tokenOutAmount = maticToTokenPrice * weiAmount /10**30;
+        //uint256 tokenOutAmount =  (maticToTokenPrice * 10**18 /weiAmount)/ 10**_tokenFactor();
+        //Amount with a % substracted
+        uint256 amountOutMin = tokenOutAmount - tokenOutAmount * slippagePorcentual/1000;
+        //path for the router
+        address[] memory path = new address[](2);
+        path[1] = TOKENADDRESS;
+        path[0] = MATIC;
+        //amount put is in 6 decimals
+        uint256[] memory amounts = _router.swapExactETHForTokens{value:weiAmount}(amountOutMin,path, address(this), block.timestamp);    
     }
 
+    function setSlippage(uint256 newSlippage) external onlyOwner {
+        slippagePorcentual = newSlippage;
+    }
     /**
      * @dev Determines how ETH is stored/forwarded on purchases.
      */
     function _forwardFunds() internal {
-        (bool success,) = msg.sender.call{value: msg.value}("");
+        //transfer USDC tokens swapped to the collector wallet
+        bool success = ERC20(TOKENADDRESS).transfer(_wallet,ERC20(TOKENADDRESS).balanceOf(address(this)));
         require(success, "Forward funds fail");
     }
 
@@ -258,6 +322,7 @@ contract GeneralPublic is Ownable, ReentrancyGuard, Pausable {
      */
     function _postValidatePurchase(address beneficiary, uint256 weiAmount) internal view {
         // solhint-disable-previous-line no-empty-blocks
+
     }
 
     /**
@@ -266,7 +331,7 @@ contract GeneralPublic is Ownable, ReentrancyGuard, Pausable {
      * @return Number of tokens that can be purchased with the specified _weiAmount
      */
     function _getTokenAmount(uint256 weiAmount) internal view returns (uint256) {
-        return weiAmount * _rate;
+        return weiAmount * rate() / 10**18;
     }
 
     function _updateScheduleAmount(address _beneficiary, uint256 _amount) internal  {
@@ -275,45 +340,30 @@ contract GeneralPublic is Ownable, ReentrancyGuard, Pausable {
         if (beneficiaryCount == 0) {
             _vestingContract.createVestingSchedule(
                 _beneficiary,
-                0,
+                lockTime,
                 vestingTime,
                 1,
                 true,
                 _amount
             );
             return;
-        } else if (beneficiaryCount == 1) {
-            if(_vestingContract.getVestingScheduleByAddressAndIndex(_beneficiary,0).creator == address(this)){
-                _vestingContract.addTotalAmount(_amount,_vestingContract.computeVestingScheduleIdForAddressAndIndex(_beneficiary, 0));
-                return;
-            } else if(_vestingContract.getVestingScheduleByAddressAndIndex(_beneficiary,0).creator == owner()){
-                _vestingContract.createVestingSchedule(
-                _beneficiary,
-                0,
-                vestingTime,
-                1,
-                true,
-                _amount
-            );
-            return;
-            }
-            } else if (beneficiaryCount > 1){
-                for(uint i ; i< beneficiaryCount ; i++){
-                    if(_vestingContract.getVestingScheduleByAddressAndIndex(_beneficiary,i).creator == address(this)){
-                        _vestingContract.addTotalAmount(_amount,_vestingContract.computeVestingScheduleIdForAddressAndIndex(_beneficiary, i));
-                        return;
-                    }
+        } else {
+            for(uint i=0; i < beneficiaryCount; i++){
+                IVesting.VestingSchedule memory vesting = _vestingContract.getVestingScheduleByAddressAndIndex(_beneficiary,i);
+                if(vesting.creator == address(this)){
+                    _vestingContract.addTotalAmount(_amount,_vestingContract.computeVestingScheduleIdForAddressAndIndex(_beneficiary, i));
+                    return;
                 }
-                _vestingContract.createVestingSchedule(
+            }
+          _vestingContract.createVestingSchedule(
                 _beneficiary,
-                0,
+                lockTime,
                 vestingTime,
                 1,
                 true,
                 _amount
             );
-            return;
-            }
+            } 
     }
 
     /**
@@ -342,7 +392,32 @@ contract GeneralPublic is Ownable, ReentrancyGuard, Pausable {
     }
 
     function withdraw() external onlyOwner {
+        require(address(this).balance > 0, "Contract has no balances");
         (bool success,) = msg.sender.call{value: address(this).balance}("");
         require(success, "Forward funds fail");
+    }
+
+    function _tokenFactor() internal view returns(uint256){
+        if(ERC20(TOKENADDRESS).decimals() == 18){
+            return 0;
+        } else {
+            return 18 - ERC20(TOKENADDRESS).decimals();
+        }
+    }
+
+    function _oracleFactor() internal view returns(uint256){
+        if(_oracle.decimals() == 18){
+            return 0;
+        } else {
+            return 18 - _oracle.decimals();
+        }
+    }
+
+    function setMinInvesment(uint256 _minInvesment) external onlyOwner {
+        minInvestment = _minInvesment;
+    }
+
+    function setMaxInvesment(uint256 _maxInvesment) external onlyOwner {
+        maxInvestment = _maxInvesment;
     }
 }

@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.1;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/math/Math.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/math/MathUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/math/SafeMathUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 interface IRoles {
     function hasRole(bytes32 role, address account)
@@ -21,18 +24,21 @@ interface IRoles {
 /**
  * @title TokenVesting
  */
-contract TokenVestingModificado is Ownable, ReentrancyGuard{
-    using SafeMath for uint256;
-    using SafeERC20 for IERC20;
+contract VestingTokens is  OwnableUpgradeable,  ReentrancyGuardUpgradeable, PausableUpgradeable, UUPSUpgradeable {
+
+    using SafeMathUpgradeable for uint256;
+    using SafeERC20Upgradeable for IERC20Upgradeable;
+
+    bool public startInitialized;
+    uint256 public startTime;
+
     struct VestingSchedule{
         bool initialized;
         // beneficiary of tokens after they are released
         address  beneficiary;
         // cliff period in seconds
-        uint256  cliff;
-        // start time of the vesting period
-        uint256  start;
-        // duration of the vesting period in seconds
+        uint256 cliff;
+        // duration of vesting
         uint256  duration;
         // duration of a slice period for the vesting in seconds
         uint256 slicePeriodSeconds;
@@ -44,14 +50,14 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
         uint256  released;
         // whether or not the vesting has been revoked
         bool revoked;
-        // address of the contract that create schedule
-        address stage;
+        // address of the creator of 1 vesting schedule
+        address creator;
     }
 
     // address of the ERC20 token
-    IERC20 immutable private _token;
+    IERC20Upgradeable public token;
 
-    IRoles immutable private _roles;
+    IRoles  public roles;
 
     bytes32 public constant DEFAULT_ADMIN_ROLE = 0x00;
 
@@ -62,6 +68,8 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
 
     event Released(uint256 amount);
     event Revoked();
+    event CreatedSchedule(address beneficiary, uint256 amount);
+    event UpdatedSchedule(address beneficiary, bytes32 scheduleId);
 
     /**
     * @dev Reverts if no vesting schedule matches the passed identifier.
@@ -80,15 +88,19 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
         _;
     }
 
-    /**
-     * @dev Creates a vesting contract.
-     * @param token_ address of the ERC20 token contract
-     */
-    constructor(address token_, address roles_) {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() initializer {   
+    }
+
+    function initialize(address token_, address roles_) external initializer {
+        __ReentrancyGuard_init();
+        __Ownable_init();
+        __Pausable_init();
         require(token_ != address(0x0));
         require(roles_ != address(0x0));
-        _token = IERC20(token_);
-        _roles = IRoles(roles_);
+        token = IERC20Upgradeable(token_);
+        roles = IRoles(roles_);
+        startInitialized = false;
     }
 
     receive() external payable {}
@@ -148,14 +160,12 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
     external
     view
     returns(address){
-        return address(_token);
+        return address(token);
     }
 
     /**
     * @notice Creates a new vesting schedule for a beneficiary.
     * @param _beneficiary address of the beneficiary to whom vested tokens are transferred
-    * @param _start start time of the vesting period
-    * @param _cliff duration in seconds of the cliff in which tokens will begin to vest
     * @param _duration duration in seconds of the period in which the tokens will vest
     * @param _slicePeriodSeconds duration of a slice period for the vesting in seconds
     * @param _revocable whether the vesting is revocable or not
@@ -163,42 +173,35 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
     */
     function createVestingSchedule(
         address _beneficiary,
-        uint256 _start,
         uint256 _cliff,
         uint256 _duration,
         uint256 _slicePeriodSeconds,
         bool _revocable,
-        uint256 _amount,
-        address _stageContract
-    )
-        public {
-            require(_roles.hasRole(_roles.getHashRole("ICO_ADDRESS"),msg.sender) || _roles.hasRole(DEFAULT_ADMIN_ROLE,msg.sender),"Caller is not vesting contract nor the owner");
-        require(
-            this.getWithdrawableAmount() >= _amount,
-            "TokenVesting: cannot create vesting schedule because not sufficient tokens"
-        );
+        uint256 _amount
+    ) public {
+        require(roles.hasRole(keccak256("ICO_ADDRESS"),msg.sender) || roles.hasRole(DEFAULT_ADMIN_ROLE,msg.sender) || (msg.sender == owner()),"Caller is not crowdsale contract nor the admin");
+        require(this.getWithdrawableAmount() >= _amount, "TokenVesting: cannot create vesting schedule because not sufficient tokens");
         require(_duration > 0, "TokenVesting: duration must be > 0");
         require(_amount > 0, "TokenVesting: amount must be > 0");
         require(_slicePeriodSeconds >= 1, "TokenVesting: slicePeriodSeconds must be >= 1");
         bytes32 vestingScheduleId = this.computeNextVestingScheduleIdForHolder(_beneficiary);
-        uint256 cliff = _start.add(_cliff);
         vestingSchedules[vestingScheduleId] = VestingSchedule(
             true,
             _beneficiary,
-            cliff,
-            _start,
+            _cliff,
             _duration,
             _slicePeriodSeconds,
             _revocable,
             _amount,
             0,
             false,
-            _stageContract
+            msg.sender
         );
         vestingSchedulesTotalAmount = vestingSchedulesTotalAmount.add(_amount);
         vestingSchedulesIds.push(vestingScheduleId);
         uint256 currentVestingCount = holdersVestingCount[_beneficiary];
         holdersVestingCount[_beneficiary] = currentVestingCount.add(1);
+        emit CreatedSchedule(_beneficiary, _amount);
     }
 
     /**
@@ -229,7 +232,7 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
         nonReentrant
         onlyOwner{
         require(this.getWithdrawableAmount() >= amount, "TokenVesting: not enough withdrawable funds");
-        _token.safeTransfer(owner(), amount);
+        token.safeTransfer(owner(), amount);
     }
 
     /**
@@ -256,7 +259,8 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
         vestingSchedule.released = vestingSchedule.released.add(amount);
         address payable beneficiaryPayable = payable(vestingSchedule.beneficiary);
         vestingSchedulesTotalAmount = vestingSchedulesTotalAmount.sub(amount);
-        _token.safeTransfer(beneficiaryPayable, amount);
+        token.safeTransfer(beneficiaryPayable, amount);
+        emit Released(amount);
     }
 
     /**
@@ -302,7 +306,7 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
         public
         view
         returns(uint256){
-        return _token.balanceOf(address(this)).sub(vestingSchedulesTotalAmount);
+        return token.balanceOf(address(this)).sub(vestingSchedulesTotalAmount);
     }
 
     /**
@@ -344,12 +348,12 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
     view
     returns(uint256){
         uint256 currentTime = getCurrentTime();
-        if ((currentTime < vestingSchedule.cliff) || vestingSchedule.revoked == true) {
+        if ((currentTime < startTime.add(vestingSchedule.cliff)) || vestingSchedule.revoked == true || !startInitialized) {
             return 0;
-        } else if (currentTime >= vestingSchedule.start.add(vestingSchedule.duration)) {
+        } else if (currentTime >= startTime.add(vestingSchedule.duration)) {
             return vestingSchedule.amountTotal.sub(vestingSchedule.released);
         } else {
-            uint256 timeFromStart = currentTime.sub(vestingSchedule.start);
+            uint256 timeFromStart = currentTime.sub(startTime);
             uint secondsPerSlice = vestingSchedule.slicePeriodSeconds;
             uint256 vestedSlicePeriods = timeFromStart.div(secondsPerSlice);
             uint256 vestedSeconds = vestedSlicePeriods.mul(secondsPerSlice);
@@ -359,6 +363,7 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
         }
     }
 
+    /// @return uint256 the timestamp of the current blocks
     function getCurrentTime()
         internal
         virtual
@@ -367,9 +372,95 @@ contract TokenVestingModificado is Ownable, ReentrancyGuard{
         return block.timestamp;
     }
 
+    /// @dev Add tokens to an already existing vesting schedule, can only be called by an account with ICO_ADDRESS role
+    /// @param _amount amount of tokens to add to the schedule
+    /// @param _scheduleId id of the schedule to modify
     function addTotalAmount(uint256 _amount, bytes32 _scheduleId) external {
-        require(_roles.hasRole(_roles.getHashRole("ICO_ADDRESS"), msg.sender));
+        require(roles.hasRole(keccak256("ICO_ADDRESS"), msg.sender));
+        require(this.getWithdrawableAmount() >= _amount, "TokenVesting: cannot update vesting schedule because not sufficient tokens");
         VestingSchedule storage schedule = vestingSchedules[_scheduleId];
         schedule.amountTotal += _amount;
+        vestingSchedulesTotalAmount = vestingSchedulesTotalAmount.add(_amount);
+        emit UpdatedSchedule(schedule.beneficiary, _scheduleId);
     }
+
+    /// @dev Set the time wich the lock time start to count
+    /// @param _timestampStart the time wich the schedules start vesting the tokens
+    function setStartTime(uint256 _timestampStart) external onlyOwner {
+        require(_timestampStart > block.timestamp, "Start time must be greater than current time");
+        startTime = _timestampStart;
+        startInitialized = true;
+    }
+
+    //Funcion para pausar
+    function pause() external onlyOwner whenNotPaused {
+        _pause();
+    }
+
+    //Funcion para despausar
+    function unpause() external onlyOwner whenPaused {
+        _unpause();
+    }
+
+    /**
+     *
+     * @dev See {utils/UUPSUpgradeable-_authorizeUpgrade}.
+     *
+     * Requirements:
+     *
+     * - The caller must have ``role``'s admin role.
+     * - The contract must be paused
+     *
+     */
+
+    function _authorizeUpgrade(address _newImplementation)
+        internal
+        override
+        whenPaused
+        onlyOwner
+    {}
+
+    /**
+     *
+     * @dev See {utils/UUPSUpgradeable-upgradeTo}.
+     *
+     * Requirements:
+     *
+     * - The caller must have ``role``'s admin role.
+     * - The contract must be paused
+     *
+     */
+
+    function upgradeTo(address _newImplementation)
+        external
+        override
+        onlyOwner
+        whenPaused
+    {
+        _authorizeUpgrade(_newImplementation);
+        _upgradeToAndCallUUPS(_newImplementation, new bytes(0), false);
+    }
+
+    /**
+     *
+     * @dev See {utils/UUPSUpgradeable-upgradeToAndCall}.
+     *
+     * Requirements:
+     *
+     * - The caller must have ``role``'s admin role.
+     * - The contract must be paused
+     *
+     */
+
+    function upgradeToAndCall(address _newImplementation, bytes memory _data)
+        external
+        payable
+        override
+        onlyOwner
+        whenPaused
+    {
+        _authorizeUpgrade(_newImplementation);
+        _upgradeToAndCallUUPS(_newImplementation, _data, true);
+    }
+
 }

@@ -14,7 +14,7 @@ contract MyToken is ERC20, Pausable, Ownable, ReentrancyGuard {
 
     constructor() ERC20("MyToken", "MTK") {
       excludedFromTax[_msgSender()] = true;
-      _mint(msg.sender, 1000000000 * 10**decimals());
+      _mint(msg.sender, 1000000000 * 10**18);
       taxEnable = false;
       setMaxWalletPercentage(100);
     }

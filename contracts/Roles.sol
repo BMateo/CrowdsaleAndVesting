@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.1;
+pragma solidity ^0.8.2;
 
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
@@ -26,11 +26,29 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
     // Store addresses with presale role
     address [] private preSaleWhitelistAddresses;
 
-    // Store addresses with airdrop role
-    address [] private airdropAddresses;
-    
+    // Store addresses with airdrop "role" & aidropClaimed "role"
+    struct Airdrop {
+        address [] airdropAddresses;
+        address [] airdropClaimedAddresses;
+        mapping(address => bool) airdropRoleMap;
+        mapping(address => bool) airdropClaimedRoleMap;
+    }
+
+    // Map the contract address to the struct
+    mapping(address => Airdrop) private contractAirdrop;
+
+    function _onlyDefaultAdminMisteryBox() private view{
+        require(hasRole(roles["MISTERY_BOX_ADDRESS"], msg.sender) || 
+        hasRole(roles["DEFAULT_ADMIN_ROLE"], msg.sender), "Error, the address does not have an Mistery Box role or Default Admin role");
+    }
+
+    modifier onlyDefaultAdminMisteryBox {
+        _onlyDefaultAdminMisteryBox();
+        _;
+    }
+
     /// @custom:oz-upgrades-unsafe-allow constructor
-    //constructor() initializer {}
+    constructor() initializer {}
 
     function initialize(address _collector) initializer external {
         require(_collector != address(0),"The address cannot be the address 0");
@@ -47,11 +65,7 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
 
         // Contracts
         roles["MISTERY_BOX_ADDRESS"] = keccak256("MISTERY_BOX_ADDRESS");
-        roles["ICO_ADDRESS"] = keccak256("ICO_ADDRESS");
-        //roles["FACTORY_ADDRESS"] = keccak256("FACTORY_ADDRESS");
-
-        // Airdrop
-        roles["AIRDROP"] = keccak256("AIRDROP");
+        roles["ICO_ADDRESS"] = keccak256("ICO_ADDRESS");        
 
         _setupRole(roles["NFT_ADMIN_ROLE"], msg.sender);
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
@@ -72,17 +86,14 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
     function grantRole(bytes32 role, address account) public virtual override whenNotPaused() {
         require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender) || hasRole(roles["NFT_ADMIN_ROLE"], msg.sender), "error in grant role");
 
-        if(role == getHashRole("NFT_ADMIN_ROLE") || role == getHashRole("AIRDROP")){
+        if(role == getHashRole("NFT_ADMIN_ROLE")){                                               
             require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Only Default admin can grant NFT Admin role or Airdrop role");
-        }
-
-        if(role == getHashRole("AIRDROP") && !hasRole(getHashRole("AIRDROP"), account)){
-            airdropAddresses.push(account);
         }
 
         _grantRole(role, account);
     }
 
+    
     /**
      * @dev Revokes `role` from `account`.
      *
@@ -95,15 +106,16 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      */
     function revokeRole(bytes32 role, address account) public virtual override whenNotPaused(){
         require(role != DEFAULT_ADMIN_ROLE, "Can't revoke default admin role");
-        require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender) || hasRole(roles["MISTERY_BOX_ADDRESS"], msg.sender) || hasRole(roles["NFT_ADMIN_ROLE"], msg.sender), "error in revoke role");
+        require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender)|| hasRole(roles["NFT_ADMIN_ROLE"], msg.sender), "error in revoke role");
         
-        if(hasRole(role, msg.sender) == hasRole(role, account) || role == getHashRole("AIRDROP")){
+        if(hasRole(role, msg.sender) == hasRole(role, account)){                              
             require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Can't revoke same role");
         }
         
         _revokeRole(role, account);
     }
 
+    
     /**
      *
      * @dev Create the hash of the string sent by parameter
@@ -114,11 +126,11 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      * - The contract must not be paused.
      *
      */
-
     function createRole(string memory _roleName) external whenNotPaused() onlyRole(DEFAULT_ADMIN_ROLE) {
         roles[_roleName] = keccak256(abi.encodePacked(_roleName));
     }
 
+    
     /**
      *
      * @dev Get the hash of the string sent by parameter
@@ -128,18 +140,14 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      * To add a role in the mapping, use {createRole}.
      *
      */
-
     function getHashRole(string memory _roleName) public view returns(bytes32) {
         return roles[_roleName];
     }
 
     /**
      *
-     * @dev Get the hash of the string sent by parameter
+     * @dev Get the address array of the Private sale whitelist
      *
-     * The role must be previously included previously the mapping `roles` 
-     *
-     * To add a role in the mapping, use {createRole}.
      *
      */
 
@@ -147,33 +155,36 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
         return privateSaleWhitelistAddresses;
     }
 
+
     /**
      *
-     * @dev Get the hash of the string sent by parameter
-     *
-     * The role must be previously included previously the mapping `roles` 
-     *
-     * To add a role in the mapping, use {createRole}.
+     * @dev Get the address array of the Presale whitelist
      *
      */
-
     function getPreSaleWhitelistAddresses() public view returns(address[] memory) {
         return preSaleWhitelistAddresses;
     }
 
+
     /**
      *
-     * @dev Get the hash of the string sent by parameter
-     *
-     * The role must be previously included previously the mapping `roles` 
-     *
-     * To add a role in the mapping, use {createRole}.
+     * @dev Get the address array of the airdrop
      *
      */
-
-    function getAirdropAddresses() public view returns(address[] memory) {
-        return airdropAddresses;
+    function getAirdropAddresses(address _nftContract) public view returns(address[] memory) {
+        return contractAirdrop[_nftContract].airdropAddresses;
     }
+
+
+    /**
+     *
+     * @dev Get the address array of the airdropClaimed
+     *
+     */
+    function getAirdropClaimedAddresses(address _nftContract) public view returns(address[] memory) {
+        return contractAirdrop[_nftContract].airdropClaimedAddresses;
+    }
+
 
     /**
      *
@@ -182,10 +193,10 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      * To add an account to the private sale, use{addPrivateSaleWhitelist}
      *
      */
-
     function isPrivateWhitelisted(address _address) external view returns(bool){
         return hasRole(getHashRole("PRIVATE_SALE_WHITELIST"), _address);
     }
+
 
     /**
      *
@@ -194,10 +205,10 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      * To add an account to the presale, use{addPreSaleWhitelist}
      *
      */
-
     function isPreSaleWhitelisted(address _address) external view returns(bool){
         return hasRole(getHashRole("PRESALE_WHITELIST"), _address);
     }
+
 
     /**
      *
@@ -209,7 +220,6 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      * - The contract must not be paused.
      *
      */
-
     function addPrivateSaleWhitelist(address _address) external whenNotPaused() onlyRole(DEFAULT_ADMIN_ROLE)  {
         if(!hasRole(roles["PRIVATE_SALE_WHITELIST"], _address)){
             emit eventWhitelist(_address,"Add account to private sale");
@@ -217,6 +227,7 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
             privateSaleWhitelistAddresses.push(_address);
         }
     }
+
 
    /**
      *
@@ -228,15 +239,15 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      * - The contract must not be paused.
      *
      */
-
     function addPreSaleWhitelist(address _address) external whenNotPaused(){
-        require(hasRole(roles["MISTERY_BOX_ADDRESS"], msg.sender) || hasRole(DEFAULT_ADMIN_ROLE,msg.sender), "Error, the address does not have an Mistery Box role"); 
+        require(hasRole(roles["MISTERY_BOX_ADDRESS"], msg.sender), "Error, the address does not have an Mistery Box role"); 
         if(!hasRole(roles["PRESALE_WHITELIST"], _address)){
             emit eventWhitelist(_address,"Add account to presale");
             _grantRole(roles["PRESALE_WHITELIST"],_address);
             preSaleWhitelistAddresses.push(_address);
         }
     }
+
 
     /**
      *
@@ -248,13 +259,13 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      * - The contract must not be paused.
      *
      */
-
     function removePrivateSaleWhitelist(address _address, uint _index) external whenNotPaused() onlyRole(DEFAULT_ADMIN_ROLE) {
         emit eventWhitelist(_address,"remove account from private sale");
         privateSaleWhitelistAddresses[_index] = privateSaleWhitelistAddresses[privateSaleWhitelistAddresses.length-1];
         privateSaleWhitelistAddresses.pop();
         revokeRole(getHashRole("PRIVATE_SALE_WHITELIST"), _address);
     }
+
 
     /**
      *
@@ -266,8 +277,6 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      * - The contract must not be paused.
      *
      */
-
-
     function removePreSaleWhitelist(address _address, uint _index) external whenNotPaused() onlyRole(DEFAULT_ADMIN_ROLE){
         emit eventWhitelist(_address,"remove account from presale");
         preSaleWhitelistAddresses[_index] = preSaleWhitelistAddresses[preSaleWhitelistAddresses.length-1];
@@ -275,37 +284,6 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
         revokeRole(getHashRole("PRESALE_WHITELIST"), _address);
     }
 
-    /**
-     *
-     * @dev remove the Airdrop role
-     *
-     * Requirements:
-     *
-     * - The caller must have ``role``'s Misterybox role.
-     * - The contract must not be paused.
-     *
-     */
-
-
-    function removeAirdropRole(address _address) external whenNotPaused(){
-        require(hasRole(roles["MISTERY_BOX_ADDRESS"], msg.sender) || hasRole(roles["DEFAULT_ADMIN_ROLE"], msg.sender), "Error, the address does not have an Mistery Box role"); 
-
-        if(airdropAddresses.length == 1){
-            _revokeRole(getHashRole("AIRDROP"), _address);
-            airdropAddresses.pop();
-            return;
-        }
-
-        for(uint i = 0; i < airdropAddresses.length;i++){
-            if (airdropAddresses[i] == _address){
-                address auxAddress = airdropAddresses[airdropAddresses.length-1];
-                airdropAddresses[i] = auxAddress;
-                airdropAddresses.pop();
-                _revokeRole(getHashRole("AIRDROP"), _address);
-                break;
-            }
-        }
-    }
 
     /**
      *
@@ -316,12 +294,12 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      * - The caller must have ``role``'s admin role.
      *
      */
-
     function pause() external whenNotPaused onlyRole(DEFAULT_ADMIN_ROLE) {
         //Debería ser la misma persona la que deploya el contrato de roles y el de misteryBox
         _pause();
     }
     
+
    /**
      *
      * @dev See {security/PausableUpgradeable-_unpause}.
@@ -331,11 +309,11 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      * - The caller must have ``role``'s admin role.
      *
      */
-
     function unpause() external whenPaused onlyRole(DEFAULT_ADMIN_ROLE) {
         //Debería ser la misma persona la que deploya el contrato de roles y el de misteryBox
         _unpause();
     }
+
 
     /**
      *
@@ -346,6 +324,7 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
         return collector;
     }
 
+
     /**
      *
      * @dev Set the collector address
@@ -354,11 +333,11 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      *
      * - The caller must have ``role``'s admin role.
      */
-
     function setCollector(address _collector) external whenNotPaused onlyRole(DEFAULT_ADMIN_ROLE){
         require(_collector != address(0));
         collector = _collector;
     }
+
 
     /**
      *
@@ -369,13 +348,13 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      * - The caller must have ``role``'s admin role.
      *
      */
-
     function _authorizeUpgrade(address newImplementation)
         internal
         onlyRole(DEFAULT_ADMIN_ROLE)
         whenPaused()
         override
     {} 
+
 
     /**
      *
@@ -387,11 +366,11 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      * - The contract must be paused 
      *
      */
-
     function upgradeTo(address newImplementation) external override onlyRole(DEFAULT_ADMIN_ROLE) whenPaused {
          _authorizeUpgrade(newImplementation);
         _upgradeToAndCallUUPS(newImplementation, new bytes(0), false);
     }
+
 
     /**
      *
@@ -403,10 +382,85 @@ contract Roles is Initializable, AccessControlUpgradeable, UUPSUpgradeable, Paus
      * - The contract must be paused 
      *
      */
-
     function upgradeToAndCall(address newImplementation, bytes memory data) external payable override onlyRole(DEFAULT_ADMIN_ROLE) whenPaused {
         _authorizeUpgrade( newImplementation);
         _upgradeToAndCallUUPS(newImplementation, data, true);
+    }
+
+
+    /**
+     * @dev Gives `AirdropRole` to `account` in a nft colection.
+     *
+     * Requirements:
+     *
+     * - The caller must have ``role``'s default admin role.
+     *
+     */
+    function addAirdropRole(address _nftContract, address _address) external onlyRole(DEFAULT_ADMIN_ROLE){
+        if(!contractAirdrop[_nftContract].airdropRoleMap[_address]){
+            Airdrop storage _mappingAirdropAux = contractAirdrop[_nftContract];
+            _mappingAirdropAux.airdropAddresses.push(_address);
+            _mappingAirdropAux.airdropRoleMap[_address] = true;
+        }  
+    }
+     
+    
+    /**
+     * @dev Gives `AirdropClaimedRole` to `account` in a nft colection.
+     *
+     * Requirements:
+     *
+     * - The caller must have ``role``'s default admin role or misterybox role.
+     *
+     */
+    function addAirdropClaimedRole(address _nftContract, address _address) external onlyDefaultAdminMisteryBox{
+        if(!contractAirdrop[_nftContract].airdropClaimedRoleMap[_address]){
+            Airdrop storage _mappingAirdropAux = contractAirdrop[_nftContract];
+            _mappingAirdropAux.airdropClaimedAddresses.push(_address);
+            _mappingAirdropAux.airdropClaimedRoleMap[_address] = true;
+        }
+    }
+
+    
+    /**
+     * @dev Removes `AirdropRole` from an `account` in a nft colection.
+     *
+     * Requirements:
+     *
+     * - The caller must have ``role``'s default admin role or misterybox role.
+     *
+     */
+    function removeAirdropRole(address _nftContract, address _address, uint _index) external onlyDefaultAdminMisteryBox{
+
+        address [] storage _arrayAirdrop = contractAirdrop[_nftContract].airdropAddresses;
+        
+        if(_arrayAirdrop.length == 1){
+            _arrayAirdrop.pop();
+            contractAirdrop[_nftContract].airdropRoleMap[_address] = false;
+            return;
+        }
+        
+        _arrayAirdrop[_index] = _arrayAirdrop[_arrayAirdrop.length-1];
+        _arrayAirdrop.pop();
+        contractAirdrop[_nftContract].airdropRoleMap[_address] = false;
+    }
+
+
+    /**
+     * @dev Returns `true` if an `account` has AirdropRole.
+     *
+     */
+    function hasAirdropRole(address _nftContract, address _address) external view returns(bool){
+        return contractAirdrop[_nftContract].airdropRoleMap[_address];
+    }
+
+
+    /**
+     * @dev Returns `true` if an `account` has already claimed his Airdrop.
+     *
+     */
+    function hasAirdropClaimedRole(address _nftContract, address _address) external view returns(bool){
+        return contractAirdrop[_nftContract].airdropClaimedRoleMap[_address];
     }
 
 }
